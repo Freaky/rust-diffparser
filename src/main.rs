@@ -1,4 +1,3 @@
-
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -44,30 +43,35 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
     if line.len() > 4 {
         match &line[0..4] {
             b"--- " => {
-                let eof = line.iter().rposition(|&b| b == b'\t').unwrap_or_else(|| line.len());
+                let eof = line
+                    .iter()
+                    .rposition(|&b| b == b'\t')
+                    .unwrap_or_else(|| line.len());
                 return DiffLine::OldFile(FileInfo {
                     filename: PathBuf::from(OsStr::from_bytes(&line[4..eof])),
                 });
             }
             b"+++ " => {
-                let eof = line.iter().rposition(|&b| b == b'\t').unwrap_or_else(|| line.len());
+                let eof = line
+                    .iter()
+                    .rposition(|&b| b == b'\t')
+                    .unwrap_or_else(|| line.len());
                 return DiffLine::NewFile(FileInfo {
                     filename: PathBuf::from(OsStr::from_bytes(&line[4..eof])),
                 });
             }
-            b"@@ -" if line.len() > 15 => { // svn also has ## for properties
+            b"@@ -" if line.len() > 15 => {
+                // svn also has ## for properties
                 // @@ -1,1 +1,1 @@
-                let mut chunks = line[3..].split(|&b| b == b' ' || b == b',');
-                let old_line_no = chunks.next().and_then(bytes_to_u32).unwrap_or_default();
-                let old_line_len = chunks.next().and_then(bytes_to_u32).unwrap_or_default();
-                let new_line_no = chunks.next().and_then(bytes_to_u32).unwrap_or_default();
-                let new_line_len = chunks.next().and_then(bytes_to_u32).unwrap_or_default();
+                let mut chunks = line[3..]
+                    .split(|&b| b == b' ' || b == b',')
+                    .flat_map(bytes_to_u32);
 
                 return DiffLine::Hunk(HunkInfo {
-                    old_line_no,
-                    new_line_no,
-                    old_line_len,
-                    new_line_len,
+                    old_line_no: chunks.next().unwrap_or_default(),
+                    old_line_len: chunks.next().unwrap_or_default(),
+                    new_line_no: chunks.next().unwrap_or_default(),
+                    new_line_len: chunks.next().unwrap_or_default(),
                 });
             }
             _ => (),
@@ -100,13 +104,15 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
             DiffLine::Modified(_) => modify += 1,
             DiffLine::Hunk(_) => hunks += 1,
             DiffLine::NewFile(_) => files += 1,
-            _ => ()
+            _ => (),
         }
     }
 
-    println!("{} file(s) changed, {} hunks, {} insertions(+), {} deletions(-), {} modifications(!)", files, hunks, insert, delete, modify);
+    println!(
+        "{} file(s) changed, {} hunks, {} insertions(+), {} deletions(-), {} modifications(!)",
+        files, hunks, insert, delete, modify
+    );
 }
-
 
 use std::env;
 use std::fs::File;
@@ -116,8 +122,4 @@ fn main() {
 
     let diff = File::open(filename).expect("open error");
     diffstat(BufReader::new(diff));
-
-    // for line in diff.split(|&b| b == b'\n') {
-        // println!("{:?}", parse_diff_line(line));
-    // }
 }
