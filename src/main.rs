@@ -1,5 +1,4 @@
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
+
 use std::path::PathBuf;
 use std::str;
 
@@ -35,6 +34,18 @@ fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
         .and_then(|s| s.parse().ok())
 }
 
+#[cfg(unix)]
+fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(OsStr::from_bytes(bytes))
+}
+
+#[cfg(windows)]
+fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes).to_string())
+}
+
 pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
     if line.is_empty() {
         return DiffLine::Skipped;
@@ -48,7 +59,7 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
                     .rposition(|&b| b == b'\t')
                     .unwrap_or_else(|| line.len());
                 return DiffLine::OldFile(FileInfo {
-                    filename: PathBuf::from(OsStr::from_bytes(&line[4..eof])),
+                    filename: bytes_to_pathbuf(&line[4..eof]),
                 });
             }
             b"+++ " => {
@@ -57,7 +68,7 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
                     .rposition(|&b| b == b'\t')
                     .unwrap_or_else(|| line.len());
                 return DiffLine::NewFile(FileInfo {
-                    filename: PathBuf::from(OsStr::from_bytes(&line[4..eof])),
+                    filename: bytes_to_pathbuf(&line[4..eof]),
                 });
             }
             b"@@ -" if line.len() > 15 => {
