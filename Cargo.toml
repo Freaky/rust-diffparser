@@ -1,5 +1,5 @@
 [package]
-name = "rust-diffparser"
+name = "diffparser"
 version = "0.1.0"
 authors = ["Thomas Hurst <tom@hur.st>"]
 edition = "2018"
