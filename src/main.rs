@@ -56,7 +56,7 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
         if let b"--- " = &line[0..4] {
             let eof = line
                 .iter()
-                .position(|&b| b == b'\t')
+                .position(|&b| b == b'\t' || b == b'\r' || b == b'\n')
                 .unwrap_or_else(|| line.len());
 
             return DiffLine::OldFile(FileInfo {
@@ -77,7 +77,7 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
         if let b"+++ " = &line[0..4] {
             let eof = line
                 .iter()
-                .position(|&b| b == b'\t')
+                .position(|&b| b == b'\t' || b == b'\r' || b == b'\n')
                 .unwrap_or_else(|| line.len());
 
             return DiffLine::NewFile(FileInfo {
