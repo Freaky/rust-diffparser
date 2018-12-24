@@ -98,6 +98,7 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
         if let b"@@ -" = &line[0..4] {
             // svn also has ## for properties
             // @@ -1,1 +1,1 @@
+            // @@ -1 +1 @@
             let mut chunks = line[3..]
                 .split(|&b| b == b' ' || b == b',')
                 .flat_map(bytes_to_u32);
@@ -125,59 +126,6 @@ fn parse_delta(line: &[u8]) -> DiffLine<'_> {
         b'!' => DiffLine::Modified(&line[1..]),
         b' ' => DiffLine::Context(&line[1..]),
         b'\\' => DiffLine::NoNewlineAtEof,
-        _ => DiffLine::Junk,
-    }
-}
-
-pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
-    if line.is_empty() {
-        return DiffLine::Empty;
-    }
-
-    if line.len() > 4 {
-        match &line[0..4] {
-            b"--- " => {
-                let eof = line
-                    .iter()
-                    .position(|&b| b == b'\t')
-                    .unwrap_or_else(|| line.len());
-                return DiffLine::OldFile(FileInfo {
-                    filename: bytes_to_pathbuf(&line[4..eof]),
-                });
-            }
-            b"+++ " => {
-                let eof = line
-                    .iter()
-                    .position(|&b| b == b'\t')
-                    .unwrap_or_else(|| line.len());
-                return DiffLine::NewFile(FileInfo {
-                    filename: bytes_to_pathbuf(&line[4..eof]),
-                });
-            }
-            b"@@ -" if line.len() > 15 => {
-                // svn also has ## for properties
-                // @@ -1,1 +1,1 @@
-                // @@ -1 +1 @@
-                let mut chunks = line[3..]
-                    .split(|&b| b == b' ' || b == b',')
-                    .flat_map(bytes_to_u32);
-
-                return DiffLine::Hunk(HunkInfo {
-                    old_line_no: chunks.next().unwrap_or_default(),
-                    old_line_len: chunks.next().unwrap_or_default(),
-                    new_line_no: chunks.next().unwrap_or_default(),
-                    new_line_len: chunks.next().unwrap_or_default(),
-                });
-            }
-            _ => (),
-        }
-    }
-
-    match line[0] {
-        b'+' => DiffLine::Inserted(&line[1..]),
-        b'-' => DiffLine::Deleted(&line[1..]),
-        b'!' => DiffLine::Modified(&line[1..]),
-        b' ' => DiffLine::Context(&line[1..]),
         _ => DiffLine::Junk,
     }
 }
@@ -298,7 +246,6 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
 
     while let Some(line) = parser.next_line() {
         let line = line.expect("read error");
-        // let parsed = parse_diff_line(&line[..]);
         match line {
             DiffLine::Inserted(_) => insert += 1,
             DiffLine::Deleted(_) => delete += 1,
