@@ -25,7 +25,6 @@ pub enum DiffLine<'a> {
     Modified(&'a [u8]),
     NoNewlineAtEof,
     Junk,
-    Empty,
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
@@ -48,10 +47,6 @@ fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
 }
 
 fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
-    if line.is_empty() {
-        return DiffLine::Empty;
-    }
-
     if line.len() > 4 {
         if let b"--- " = &line[0..4] {
             let eof = line
@@ -69,10 +64,6 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
 }
 
 fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
-    if line.is_empty() {
-        return DiffLine::Empty;
-    }
-
     if line.len() > 4 {
         if let b"+++ " = &line[0..4] {
             let eof = line
@@ -90,10 +81,6 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
 }
 
 fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
-    if line.is_empty() {
-        return DiffLine::Empty;
-    }
-
     if line.len() > 11 {
         if let b"@@ -1 +1 @@" = &line[0..11] {
             return DiffLine::Hunk(HunkInfo {
@@ -125,10 +112,6 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
 }
 
 fn parse_delta(line: &[u8]) -> DiffLine<'_> {
-    if line.is_empty() {
-        return DiffLine::Empty;
-    }
-
     match line[0] {
         b'+' => DiffLine::Inserted(&line[1..]),
         b'-' => DiffLine::Deleted(&line[1..]),
