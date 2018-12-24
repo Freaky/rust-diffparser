@@ -94,7 +94,16 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
         return DiffLine::Empty;
     }
 
-    if line.len() > 15 {
+    if line.len() > 11 {
+        if let b"@@ -1 +1 @@" = &line[0..11] {
+            return DiffLine::Hunk(HunkInfo {
+                old_line_no: 1,
+                new_line_no: 1,
+                old_line_len: 1,
+                new_line_len: 1,
+            });
+        }
+
         if let b"@@ -" = &line[0..4] {
             // svn also has ## for properties
             // @@ -1,1 +1,1 @@
@@ -210,7 +219,7 @@ impl<R: BufRead> DiffParser<R> {
                     }
                     DiffLine::Deleted(_) => {
                         *old -= 1;
-                    },
+                    }
                     DiffLine::NoNewlineAtEof => (),
                     _ => {
                         println!(
