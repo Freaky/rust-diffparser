@@ -56,7 +56,7 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
             b"--- " => {
                 let eof = line
                     .iter()
-                    .rposition(|&b| b == b'\t')
+                    .position(|&b| b == b'\t')
                     .unwrap_or_else(|| line.len());
                 return DiffLine::OldFile(FileInfo {
                     filename: bytes_to_pathbuf(&line[4..eof]),
@@ -65,7 +65,7 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
             b"+++ " => {
                 let eof = line
                     .iter()
-                    .rposition(|&b| b == b'\t')
+                    .position(|&b| b == b'\t')
                     .unwrap_or_else(|| line.len());
                 return DiffLine::NewFile(FileInfo {
                     filename: bytes_to_pathbuf(&line[4..eof]),
