@@ -24,7 +24,8 @@ pub enum DiffLine<'a> {
     Inserted(&'a [u8]),
     Deleted(&'a [u8]),
     Modified(&'a [u8]),
-    Skipped,
+    Junk,
+    Empty,
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
@@ -48,7 +49,7 @@ fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
 
 pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
     if line.is_empty() {
-        return DiffLine::Skipped;
+        return DiffLine::Empty;
     }
 
     if line.len() > 4 {
@@ -94,7 +95,106 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
         b'-' => DiffLine::Deleted(&line[1..]),
         b'!' => DiffLine::Modified(&line[1..]),
         b' ' => DiffLine::Context(&line[1..]),
-        _ => DiffLine::Skipped,
+        _ => DiffLine::Junk,
+    }
+}
+
+#[derive(Debug)]
+enum State {
+    Junk,
+    OldFile,
+    NewFile,
+    Hunk(i32, i32)
+}
+
+use std::io;
+use std::io::BufRead;
+
+struct DiffParser<R> {
+    inner: R,
+    state: State,
+    line: Vec<u8>
+}
+
+impl<R: BufRead> DiffParser<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            state: State::Junk,
+            line: vec![],
+        }
+    }
+
+    fn next_line(&mut self) -> Option<io::Result<DiffLine>> {
+        self.line.clear();
+
+        let parsed = self.inner
+            .read_until(b'\n', &mut self.line);
+
+        let line = match parsed {
+            Ok(0) => return None,
+            Ok(_) => parse_diff_line(&self.line[..]),
+            Err(err) => return Some(Err(err)),
+        };
+
+        match self.state {
+            State::Junk => {
+                if let DiffLine::OldFile(_) = line {
+                    self.state = State::OldFile;
+                    return Some(Ok(line));
+                } else {
+                    return Some(Ok(DiffLine::Junk));
+                }
+            },
+            State::OldFile => {
+                if let DiffLine::NewFile(_) = line {
+                    self.state = State::NewFile;
+                    return Some(Ok(line));
+                } else {
+                    self.state = State::Junk;
+                    return Some(Ok(DiffLine::Junk));
+                }
+            },
+            State::NewFile => {
+                if let DiffLine::Hunk(ref info) = line {
+                    self.state = State::Hunk(info.old_line_len as i32, info.new_line_len as i32);
+                    return Some(Ok(line));
+                } else {
+                    self.state = State::Junk;
+                    return Some(Ok(DiffLine::Junk));
+                }
+            },
+            State::Hunk(ref mut old, ref mut new) => {
+                match self.line[0] {
+                    b' ' | b'!' => {
+                        *old -= 1;
+                        *new -= 1;
+                    },
+                    b'+' => {
+                        *new -= 1;
+                    },
+                    b'-' => {
+                        *old -= 1;
+                    },
+                    _ => {
+                        println!("JUNK IN THE HUNK! state={:?}, line={:?}, raw={}", self.state, line, String::from_utf8_lossy(&self.line[..]));
+                        self.state = State::Junk;
+                        return Some(Ok(DiffLine::Junk));
+                    }
+                };
+
+                if *old < 0 || *new < 0 {
+                    self.state = State::Junk;
+                    return Some(Ok(DiffLine::Junk));
+                }
+
+                if *old == 0 && *new == 0 {
+                    self.state = State::Junk;
+                }
+
+                Some(Ok(line))
+            }
+        }
     }
 }
 
@@ -106,10 +206,12 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
     let mut delete = 0;
     let mut modify = 0;
 
-    for line in diff.split(b'\n') {
+    let mut parser = DiffParser::new(diff);
+
+    while let Some(line) = parser.next_line() {
         let line = line.expect("read error");
-        let parsed = parse_diff_line(&line[..]);
-        match parsed {
+        // let parsed = parse_diff_line(&line[..]);
+        match line {
             DiffLine::Inserted(_) => insert += 1,
             DiffLine::Deleted(_) => delete += 1,
             DiffLine::Modified(_) => modify += 1,
