@@ -1,4 +1,3 @@
-
 use std::path::PathBuf;
 use std::str;
 
@@ -24,6 +23,7 @@ pub enum DiffLine<'a> {
     Inserted(&'a [u8]),
     Deleted(&'a [u8]),
     Modified(&'a [u8]),
+    NoNewlineAtEof,
     Junk,
     Empty,
 }
@@ -45,6 +45,88 @@ fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
 #[cfg(windows)]
 fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes).to_string())
+}
+
+fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
+    if line.is_empty() {
+        return DiffLine::Empty;
+    }
+
+    if line.len() > 4 {
+        if let b"--- " = &line[0..4] {
+            let eof = line
+                .iter()
+                .position(|&b| b == b'\t')
+                .unwrap_or_else(|| line.len());
+
+            return DiffLine::OldFile(FileInfo {
+                filename: bytes_to_pathbuf(&line[4..eof]),
+            });
+        }
+    }
+
+    DiffLine::Junk
+}
+
+fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
+    if line.is_empty() {
+        return DiffLine::Empty;
+    }
+
+    if line.len() > 4 {
+        if let b"+++ " = &line[0..4] {
+            let eof = line
+                .iter()
+                .position(|&b| b == b'\t')
+                .unwrap_or_else(|| line.len());
+
+            return DiffLine::NewFile(FileInfo {
+                filename: bytes_to_pathbuf(&line[4..eof]),
+            });
+        }
+    }
+
+    DiffLine::Junk
+}
+
+fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
+    if line.is_empty() {
+        return DiffLine::Empty;
+    }
+
+    if line.len() > 15 {
+        if let b"@@ -" = &line[0..4] {
+            // svn also has ## for properties
+            // @@ -1,1 +1,1 @@
+            let mut chunks = line[3..]
+                .split(|&b| b == b' ' || b == b',')
+                .flat_map(bytes_to_u32);
+
+            return DiffLine::Hunk(HunkInfo {
+                old_line_no: chunks.next().unwrap_or_default(),
+                old_line_len: chunks.next().unwrap_or_default(),
+                new_line_no: chunks.next().unwrap_or_default(),
+                new_line_len: chunks.next().unwrap_or_default(),
+            });
+        }
+    }
+
+    DiffLine::Junk
+}
+
+fn parse_delta(line: &[u8]) -> DiffLine<'_> {
+    if line.is_empty() {
+        return DiffLine::Empty;
+    }
+
+    match line[0] {
+        b'+' => DiffLine::Inserted(&line[1..]),
+        b'-' => DiffLine::Deleted(&line[1..]),
+        b'!' => DiffLine::Modified(&line[1..]),
+        b' ' => DiffLine::Context(&line[1..]),
+        b'\\' => DiffLine::NoNewlineAtEof,
+        _ => DiffLine::Junk,
+    }
 }
 
 pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
@@ -75,6 +157,7 @@ pub fn parse_diff_line(line: &[u8]) -> DiffLine<'_> {
             b"@@ -" if line.len() > 15 => {
                 // svn also has ## for properties
                 // @@ -1,1 +1,1 @@
+                // @@ -1 +1 @@
                 let mut chunks = line[3..]
                     .split(|&b| b == b' ' || b == b',')
                     .flat_map(bytes_to_u32);
@@ -104,7 +187,7 @@ enum State {
     Junk,
     OldFile,
     NewFile,
-    Hunk(i32, i32)
+    Hunk(i32, i32),
 }
 
 use std::io;
@@ -113,7 +196,7 @@ use std::io::BufRead;
 struct DiffParser<R> {
     inner: R,
     state: State,
-    line: Vec<u8>
+    line: Vec<u8>,
 }
 
 impl<R: BufRead> DiffParser<R> {
@@ -128,68 +211,73 @@ impl<R: BufRead> DiffParser<R> {
     fn next_line(&mut self) -> Option<io::Result<DiffLine>> {
         self.line.clear();
 
-        let parsed = self.inner
-            .read_until(b'\n', &mut self.line);
+        let parsed = self.inner.read_until(b'\n', &mut self.line);
 
-        let line = match parsed {
+        match parsed {
             Ok(0) => return None,
-            Ok(_) => parse_diff_line(&self.line[..]),
+            Ok(_) => (),
             Err(err) => return Some(Err(err)),
         };
 
         match self.state {
             State::Junk => {
+                let line = parse_old_file(&self.line[..]);
                 if let DiffLine::OldFile(_) = line {
                     self.state = State::OldFile;
-                    return Some(Ok(line));
-                } else {
-                    return Some(Ok(DiffLine::Junk));
                 }
-            },
+
+                Some(Ok(line))
+            }
             State::OldFile => {
+                let line = parse_new_file(&self.line[..]);
+
                 if let DiffLine::NewFile(_) = line {
                     self.state = State::NewFile;
-                    return Some(Ok(line));
                 } else {
                     self.state = State::Junk;
-                    return Some(Ok(DiffLine::Junk));
                 }
-            },
+
+                Some(Ok(line))
+            }
             State::NewFile => {
+                let line = parse_hunk(&self.line[..]);
+
                 if let DiffLine::Hunk(ref info) = line {
                     self.state = State::Hunk(info.old_line_len as i32, info.new_line_len as i32);
-                    return Some(Ok(line));
                 } else {
                     self.state = State::Junk;
-                    return Some(Ok(DiffLine::Junk));
                 }
-            },
+
+                Some(Ok(line))
+            }
             State::Hunk(ref mut old, ref mut new) => {
-                match self.line[0] {
-                    b' ' | b'!' => {
+                let line = parse_delta(&self.line[..]);
+                match line {
+                    DiffLine::Context(_) | DiffLine::Modified(_) => {
                         *old -= 1;
                         *new -= 1;
-                    },
-                    b'+' => {
+                    }
+                    DiffLine::Inserted(_) => {
                         *new -= 1;
-                    },
-                    b'-' => {
+                    }
+                    DiffLine::Deleted(_) => {
                         *old -= 1;
                     },
+                    DiffLine::NoNewlineAtEof => (),
                     _ => {
-                        println!("JUNK IN THE HUNK! state={:?}, line={:?}, raw={}", self.state, line, String::from_utf8_lossy(&self.line[..]));
+                        println!(
+                            "JUNK IN THE HUNK! state={:?}, line={:?}, raw={}",
+                            self.state,
+                            line,
+                            String::from_utf8_lossy(&self.line[..])
+                        );
                         self.state = State::Junk;
                         return Some(Ok(DiffLine::Junk));
                     }
                 };
 
-                if *old < 0 || *new < 0 {
-                    self.state = State::Junk;
-                    return Some(Ok(DiffLine::Junk));
-                }
-
-                if *old == 0 && *new == 0 {
-                    self.state = State::Junk;
+                if (*old < 0 || *new < 0) || (*old == 0 && *new == 0) {
+                    self.state = State::NewFile;
                 }
 
                 Some(Ok(line))
@@ -217,6 +305,9 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
             DiffLine::Modified(_) => modify += 1,
             DiffLine::Hunk(_) => hunks += 1,
             DiffLine::NewFile(_) => files += 1,
+            DiffLine::Junk => {
+                // eprintln!("JUNK: line={}", String::from_utf8_lossy(&parser.line[..]));
+            }
             _ => (),
         }
     }
