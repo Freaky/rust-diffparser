@@ -28,9 +28,7 @@ pub enum DiffLine<'a> {
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
-    str::from_utf8(bytes)
-        .ok()
-        .and_then(|s| s.parse().ok())
+    str::from_utf8(bytes).ok().and_then(|s| s.parse().ok())
 }
 
 #[cfg(unix)]

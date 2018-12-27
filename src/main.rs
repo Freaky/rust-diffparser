@@ -1,5 +1,4 @@
-
-use diffparser::{DiffParser, DiffLine};
+use diffparser::{DiffLine, DiffParser};
 
 use std::io::BufReader;
 fn diffstat<R: std::io::BufRead>(diff: R) {
