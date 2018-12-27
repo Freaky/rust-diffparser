@@ -6,7 +6,7 @@ pub struct FileInfo {
     pub filename: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HunkInfo {
     pub old_line_no: u32,
     pub old_line_len: u32,
@@ -30,7 +30,6 @@ pub enum DiffLine<'a> {
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
     str::from_utf8(bytes)
         .ok()
-        .map(|s| s.trim_matches(|b| !char::is_numeric(b)))
         .and_then(|s| s.parse().ok())
 }
 
@@ -82,29 +81,34 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
 
 fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
     if line.len() > 11 {
-        if let b"@@ -1 +1 @@" = &line[0..11] {
-            return DiffLine::Hunk(HunkInfo {
-                old_line_no: 1,
-                new_line_no: 1,
-                old_line_len: 1,
-                new_line_len: 1,
-            });
-        }
-
         if let b"@@ -" = &line[0..4] {
             // svn also has ## for properties
             // @@ -1,1 +1,1 @@
             // @@ -1 +1 @@
-            let mut chunks = line[3..]
-                .split(|&b| b == b' ' || b == b',')
-                .flat_map(bytes_to_u32);
 
-            return DiffLine::Hunk(HunkInfo {
-                old_line_no: chunks.next().unwrap_or_default(),
-                old_line_len: chunks.next().unwrap_or_default(),
-                new_line_no: chunks.next().unwrap_or_default(),
-                new_line_len: chunks.next().unwrap_or_default(),
-            });
+            let mut hunk = HunkInfo::default();
+
+            let mut chunks = line[4..]
+                .split(|&b| b == b' ')
+                .map(|chunk| chunk.split(|&b| b == b','));
+
+            if let (Some(mut old), Some(mut new)) = (chunks.next(), chunks.next()) {
+                if let Some(oln) = old.next().and_then(bytes_to_u32) {
+                    hunk.old_line_no = oln;
+                    hunk.old_line_len = old.next().and_then(bytes_to_u32).unwrap_or(1);
+                } else {
+                    return DiffLine::Junk;
+                }
+
+                if let Some(nln) = new.next().and_then(|b| bytes_to_u32(&b[1..])) {
+                    hunk.new_line_no = nln;
+                    hunk.new_line_len = new.next().and_then(bytes_to_u32).unwrap_or(1);
+                } else {
+                    return DiffLine::Junk;
+                }
+
+                return DiffLine::Hunk(hunk);
+            }
         }
     }
 
