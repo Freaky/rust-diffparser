@@ -18,6 +18,7 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
             DiffLine::Modified(_) => modify += 1,
             DiffLine::Hunk(_) => hunks += 1,
             DiffLine::NewFile(_) => files += 1,
+            DiffLine::Binaries(_, _) => files += 1,
             DiffLine::Junk => {
                 // eprintln!("JUNK: line={}", String::from_utf8_lossy(&parser.line[..]));
             }
@@ -25,10 +26,25 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
         }
     }
 
-    println!(
-        "{} file(s) changed, {} hunks, {} insertions(+), {} deletions(-), {} modifications(!)",
-        files, hunks, insert, delete, modify
-    );
+    print!(" {} files changed", files);
+
+    if hunks > 0 {
+        print!(", {} hunks", hunks);
+    }
+
+    if insert > 0 {
+        print!(", {} insertions(+)", insert);
+    }
+
+    if delete > 0 {
+        print!(", {} deletions(-)", delete);
+    }
+
+    if modify > 0 {
+        print!(", {} modifications(!)", modify);
+    }
+
+    println!();
 }
 
 use std::env;

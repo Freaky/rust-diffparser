@@ -18,6 +18,7 @@ pub struct HunkInfo {
 pub enum DiffLine<'a> {
     OldFile(FileInfo),
     NewFile(FileInfo),
+    Binaries(PathBuf, PathBuf),
     Hunk(HunkInfo),
     Context(&'a [u8]),
     Inserted(&'a [u8]),
@@ -44,6 +45,20 @@ fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
 }
 
 fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
+    if line.len() > 27 {
+        if let b"Binary files " = &line[0..13] {
+            if !line.ends_with(b"differ\n") {
+                return DiffLine::Junk;
+            }
+
+            // Binary files sigh and blegh differ
+            let x = &line[13..line.len() - 7];
+            if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
+                return DiffLine::Binaries(bytes_to_pathbuf(&x[0..pos]), bytes_to_pathbuf(&x[pos..]));
+            }
+        }
+    }
+
     if line.len() > 4 {
         if let b"--- " = &line[0..4] {
             let eof = line
