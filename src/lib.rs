@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::str;
 
 #[derive(Debug)]
 pub struct FileInfo {
@@ -29,7 +28,29 @@ pub enum DiffLine<'a> {
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
-    str::from_utf8(bytes).ok().and_then(|s| s.parse().ok())
+    if bytes.is_empty() {
+        return None;
+    }
+
+    bytes.iter().try_fold(0u32, |acc, byte| {
+        acc.checked_mul(10).and_then(|acc| {
+            (*byte as char)
+                .to_digit(10)
+                .and_then(|digit| acc.checked_add(digit))
+        })
+    })
+}
+
+#[test]
+fn test_bytes_to_u32() {
+    assert_eq!(bytes_to_u32(b"0"), Some(0));
+    assert_eq!(bytes_to_u32(b"10"), Some(10));
+    assert_eq!(bytes_to_u32(b"42"), Some(42));
+    assert_eq!(bytes_to_u32(b"4294967295"), Some(4294967295));
+    assert_eq!(bytes_to_u32(b"4294967296"), None);
+    assert_eq!(bytes_to_u32(b"12345six"), None);
+    assert_eq!(bytes_to_u32(b"nope"), None);
+    assert_eq!(bytes_to_u32(b""), None);
 }
 
 #[cfg(unix)]
@@ -54,7 +75,10 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
             // Binary files sigh and blegh differ
             let x = &line[13..line.len() - 7];
             if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
-                return DiffLine::Binaries(bytes_to_pathbuf(&x[0..pos]), bytes_to_pathbuf(&x[pos..]));
+                return DiffLine::Binaries(
+                    bytes_to_pathbuf(&x[0..pos]),
+                    bytes_to_pathbuf(&x[pos..]),
+                );
             }
         }
     }
