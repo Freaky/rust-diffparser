@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct FileInfo<'a> {
@@ -52,18 +51,6 @@ fn test_bytes_to_u32() {
     assert_eq!(bytes_to_u32(b"12345six"), None);
     assert_eq!(bytes_to_u32(b"nope"), None);
     assert_eq!(bytes_to_u32(b""), None);
-}
-
-#[cfg(unix)]
-fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-    PathBuf::from(OsStr::from_bytes(bytes))
-}
-
-#[cfg(windows)]
-fn bytes_to_pathbuf(bytes: &[u8]) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(bytes).to_string())
 }
 
 fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
