@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 #[derive(Debug)]
-pub struct FileInfo {
-    pub filename: PathBuf,
+pub struct FileInfo<'a> {
+    pub filename: &'a [u8],
+    pub metadata: Option<&'a [u8]>
 }
 
 #[derive(Debug, Default)]
@@ -15,9 +16,9 @@ pub struct HunkInfo {
 
 #[derive(Debug)]
 pub enum DiffLine<'a> {
-    OldFile(FileInfo),
-    NewFile(FileInfo),
-    Binaries(PathBuf, PathBuf),
+    OldFile(FileInfo<'a>),
+    NewFile(FileInfo<'a>),
+    Binaries(&'a [u8], &'a [u8]),
     Hunk(HunkInfo),
     Context(&'a [u8]),
     Inserted(&'a [u8]),
@@ -76,8 +77,8 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
             let x = &line[13..line.len() - 7];
             if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
                 return DiffLine::Binaries(
-                    bytes_to_pathbuf(&x[0..pos]),
-                    bytes_to_pathbuf(&x[pos..]),
+                    &x[0..pos],
+                    &x[pos..],
                 );
             }
         }
@@ -91,7 +92,8 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
                 .unwrap_or_else(|| line.len());
 
             return DiffLine::OldFile(FileInfo {
-                filename: bytes_to_pathbuf(&line[4..eof]),
+                filename: &line[4..eof],
+                metadata: if eof != line.len() { Some(&line[eof..line.len()]) } else { None }
             });
         }
     }
@@ -108,7 +110,8 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
                 .unwrap_or_else(|| line.len());
 
             return DiffLine::NewFile(FileInfo {
-                filename: bytes_to_pathbuf(&line[4..eof]),
+                filename: &line[4..eof],
+                metadata: if eof != line.len() { Some(&line[eof..line.len()]) } else { None }
             });
         }
     }
