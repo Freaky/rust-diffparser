@@ -1,8 +1,9 @@
+use std::fmt;
 
 #[derive(Debug)]
 pub struct FileInfo<'a> {
     pub filename: &'a [u8],
-    pub metadata: Option<&'a [u8]>
+    pub metadata: Option<&'a [u8]>,
 }
 
 #[derive(Debug, Default)]
@@ -25,6 +26,53 @@ pub enum DiffLine<'a> {
     Modified(&'a [u8]),
     NoNewlineAtEof,
     Junk,
+}
+
+impl fmt::Display for HunkInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "@@ -{}", self.old_line_no)?;
+        if self.old_line_len > 1 {
+            write!(f, ",{}", self.old_line_len)?;
+        }
+
+        write!(f, " +{}", self.new_line_no)?;
+        if self.new_line_len > 1 {
+            write!(f, ",{}", self.new_line_len)?;
+        }
+        write!(f, " @@")
+    }
+}
+
+impl fmt::Display for FileInfo<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(self.filename))?;
+        if let Some(md) = self.metadata {
+            write!(f, "\t{}", String::from_utf8_lossy(md))?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for DiffLine<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DiffLine::OldFile(fi) => write!(f, "--- {}", fi),
+            DiffLine::NewFile(fi) => write!(f, "+++ {}", fi),
+            DiffLine::Binaries(a, b) => write!(
+                f,
+                "Binary files {} and {} differ",
+                String::from_utf8_lossy(a),
+                String::from_utf8_lossy(b)
+            ),
+            DiffLine::Hunk(hi) => write!(f, "{}", hi),
+            DiffLine::Context(l) => write!(f, " {}", String::from_utf8_lossy(l)),
+            DiffLine::Inserted(l) => write!(f, "+{}", String::from_utf8_lossy(l)),
+            DiffLine::Deleted(l) => write!(f, "-{}", String::from_utf8_lossy(l)),
+            DiffLine::Modified(l) => write!(f, "!{}", String::from_utf8_lossy(l)),
+            DiffLine::NoNewlineAtEof => write!(f, "\\ No newline at EOF"),
+            DiffLine::Junk => Ok(()),
+        }
+    }
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
@@ -54,14 +102,18 @@ fn test_bytes_to_u32() {
 }
 
 fn parse_fileinfo(line: &[u8]) -> FileInfo<'_> {
-   let eof = line
+    let eof = line
         .iter()
         .position(|&b| b == b'\t' || b == b'\r' || b == b'\n')
         .unwrap_or_else(|| line.len());
 
     FileInfo {
         filename: &line[4..eof],
-        metadata: if eof != line.len() { Some(&line[eof..line.len()]) } else { None }
+        metadata: if eof != line.len() {
+            Some(&line[eof..line.len()])
+        } else {
+            None
+        },
     }
 }
 
@@ -70,10 +122,7 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
         // Binary files sigh and blegh differ
         let x = &line[b"Binary files ".len()..line.len() - b"differ\n".len()];
         if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
-            return DiffLine::Binaries(
-                &x[0..pos],
-                &x[pos..],
-            );
+            return DiffLine::Binaries(&x[0..pos], &x[pos..]);
         }
     }
 
