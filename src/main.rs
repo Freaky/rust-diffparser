@@ -19,9 +19,6 @@ fn diffstat<R: std::io::BufRead>(diff: R) {
             DiffLine::Hunk(_) => hunks += 1,
             DiffLine::NewFile(_) => files += 1,
             DiffLine::Binaries(_, _) => files += 1,
-            DiffLine::Junk => {
-                // eprintln!("JUNK: line={}", String::from_utf8_lossy(&parser.line[..]));
-            }
             _ => (),
         }
     }

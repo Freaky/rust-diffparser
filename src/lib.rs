@@ -25,7 +25,7 @@ pub enum DiffLine<'a> {
     Deleted(&'a [u8]),
     Modified(&'a [u8]),
     NoNewlineAtEof,
-    Junk,
+    Junk(&'a [u8]),
 }
 
 impl fmt::Display for HunkInfo {
@@ -70,7 +70,7 @@ impl fmt::Display for DiffLine<'_> {
             DiffLine::Deleted(l) => write!(f, "-{}", String::from_utf8_lossy(l)),
             DiffLine::Modified(l) => write!(f, "!{}", String::from_utf8_lossy(l)),
             DiffLine::NoNewlineAtEof => write!(f, "\\ No newline at EOF"),
-            DiffLine::Junk => Ok(()),
+            DiffLine::Junk(l) => Ok(()),
         }
     }
 }
@@ -130,7 +130,7 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
         return DiffLine::OldFile(parse_fileinfo(line));
     }
 
-    DiffLine::Junk
+    DiffLine::Junk(line)
 }
 
 fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
@@ -138,7 +138,7 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
         return DiffLine::NewFile(parse_fileinfo(line));
     }
 
-    DiffLine::Junk
+    DiffLine::Junk(line)
 }
 
 fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
@@ -158,21 +158,21 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
                 hunk.old_line_no = oln;
                 hunk.old_line_len = old.next().and_then(bytes_to_u32).unwrap_or(1);
             } else {
-                return DiffLine::Junk;
+                return DiffLine::Junk(line);
             }
 
             if let Some(nln) = new.next().and_then(|b| bytes_to_u32(&b[1..])) {
                 hunk.new_line_no = nln;
                 hunk.new_line_len = new.next().and_then(bytes_to_u32).unwrap_or(1);
             } else {
-                return DiffLine::Junk;
+                return DiffLine::Junk(line);
             }
 
             return DiffLine::Hunk(hunk);
         }
     }
 
-    DiffLine::Junk
+    DiffLine::Junk(line)
 }
 
 fn parse_delta(line: &[u8]) -> DiffLine<'_> {
@@ -182,7 +182,7 @@ fn parse_delta(line: &[u8]) -> DiffLine<'_> {
         b'!' => DiffLine::Modified(&line[1..]),
         b' ' => DiffLine::Context(&line[1..]),
         b'\\' => DiffLine::NoNewlineAtEof,
-        _ => DiffLine::Junk,
+        _ => DiffLine::Junk(line),
     }
 }
 
@@ -268,16 +268,11 @@ impl<R: BufRead> DiffParser<R> {
                         *old -= 1;
                     }
                     DiffLine::NoNewlineAtEof => (),
-                    _ => {
-                        println!(
-                            "JUNK IN THE HUNK! state={:?}, line={:?}, raw={}",
-                            self.state,
-                            line,
-                            String::from_utf8_lossy(&self.line[..])
-                        );
+                    DiffLine::Junk(line) => {
                         self.state = State::Junk;
-                        return Some(Ok(DiffLine::Junk));
-                    }
+                        return Some(Ok(DiffLine::Junk(line)));
+                    },
+                    _ => unreachable!()
                 };
 
                 if (*old < 0 || *new < 0) || (*old == 0 && *new == 0) {
