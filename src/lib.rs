@@ -58,7 +58,7 @@ impl fmt::Display for DiffLine<'_> {
         match self {
             DiffLine::OldFile(fi) => write!(f, "--- {}", fi),
             DiffLine::NewFile(fi) => write!(f, "+++ {}", fi),
-            DiffLine::Binaries(a, b) => write!(
+            DiffLine::Binaries(a, b) => writeln!(
                 f,
                 "Binary files {} and {} differ",
                 String::from_utf8_lossy(a),
@@ -69,8 +69,8 @@ impl fmt::Display for DiffLine<'_> {
             DiffLine::Inserted(l) => write!(f, "+{}", String::from_utf8_lossy(l)),
             DiffLine::Deleted(l) => write!(f, "-{}", String::from_utf8_lossy(l)),
             DiffLine::Modified(l) => write!(f, "!{}", String::from_utf8_lossy(l)),
-            DiffLine::NoNewlineAtEof => write!(f, "\\ No newline at EOF"),
-            DiffLine::Junk(l) => Ok(()),
+            DiffLine::NoNewlineAtEof => writeln!(f, "\\ No newline at end of file"),
+            DiffLine::Junk(l) => write!(f, "{}", String::from_utf8_lossy(l))
         }
     }
 }
