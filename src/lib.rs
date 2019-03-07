@@ -1,3 +1,4 @@
+
 use std::fmt;
 
 #[derive(Debug)]
@@ -7,11 +8,12 @@ pub struct FileInfo<'a> {
 }
 
 #[derive(Debug, Default)]
-pub struct HunkInfo {
+pub struct HunkInfo<'a> {
     pub old_line_no: u32,
     pub old_line_len: u32,
     pub new_line_no: u32,
     pub new_line_len: u32,
+    pub context: Option<&'a [u8]>,
 }
 
 #[derive(Debug)]
@@ -19,7 +21,7 @@ pub enum DiffLine<'a> {
     OldFile(FileInfo<'a>),
     NewFile(FileInfo<'a>),
     Binaries(&'a [u8], &'a [u8]),
-    Hunk(HunkInfo),
+    Hunk(HunkInfo<'a>),
     Context(&'a [u8]),
     Inserted(&'a [u8]),
     Deleted(&'a [u8]),
@@ -28,7 +30,7 @@ pub enum DiffLine<'a> {
     Junk(&'a [u8]),
 }
 
-impl fmt::Display for HunkInfo {
+impl fmt::Display for HunkInfo<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "@@ -{}", self.old_line_no)?;
         if self.old_line_len > 1 {
@@ -39,7 +41,13 @@ impl fmt::Display for HunkInfo {
         if self.new_line_len > 1 {
             write!(f, ",{}", self.new_line_len)?;
         }
-        write!(f, " @@")
+        write!(f, " @@")?;
+
+        if let Some(ctx) = self.context {
+            write!(f, "\t{}", String::from_utf8_lossy(ctx))?;
+        }
+
+        Ok(())
     }
 }
 
