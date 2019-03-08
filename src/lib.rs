@@ -83,7 +83,7 @@ impl fmt::Display for DiffLine<'_> {
     }
 }
 
-fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
+fn parse_u32(bytes: &[u8]) -> Option<u32> {
     if bytes.is_empty() {
         return None;
     }
@@ -98,15 +98,29 @@ fn bytes_to_u32(bytes: &[u8]) -> Option<u32> {
 }
 
 #[test]
-fn test_bytes_to_u32() {
-    assert_eq!(bytes_to_u32(b"0"), Some(0));
-    assert_eq!(bytes_to_u32(b"10"), Some(10));
-    assert_eq!(bytes_to_u32(b"42"), Some(42));
-    assert_eq!(bytes_to_u32(b"4294967295"), Some(4294967295));
-    assert_eq!(bytes_to_u32(b"4294967296"), None);
-    assert_eq!(bytes_to_u32(b"12345six"), None);
-    assert_eq!(bytes_to_u32(b"nope"), None);
-    assert_eq!(bytes_to_u32(b""), None);
+fn test_parse_u32() {
+    assert_eq!(parse_u32(b"0"), Some(0));
+    assert_eq!(parse_u32(b"10"), Some(10));
+    assert_eq!(parse_u32(b"42"), Some(42));
+    assert_eq!(parse_u32(b"4294967295"), Some(4294967295));
+    assert_eq!(parse_u32(b"4294967296"), None);
+    assert_eq!(parse_u32(b"12345six"), None);
+    assert_eq!(parse_u32(b"nope"), None);
+    assert_eq!(parse_u32(b""), None);
+}
+
+fn parse_range(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut bits = bytes.split(|&b| b == b',').flat_map(parse_u32);
+
+    Some((bits.next()?, bits.next().unwrap_or(1)))
+}
+
+#[test]
+fn test_parse_range() {
+    assert_eq!(parse_range(b"12,24"), Some((12,24)));
+    assert_eq!(parse_range(b"12"), Some((12,1)));
+    assert_eq!(parse_range(b"42,"), Some((42,1)));
+    assert_eq!(parse_range(b","), None);
 }
 
 fn parse_fileinfo(line: &[u8]) -> FileInfo<'_> {
@@ -157,27 +171,20 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
 
         let mut hunk = HunkInfo::default();
 
-        let mut chunks = line[4..]
+        let mut chunks = line[3..]
             .split(|&b| b == b' ')
-            .map(|chunk| chunk.split(|&b| b == b','));
+            .flat_map(|chunk| parse_range(&chunk[1..]));
 
-        if let (Some(mut old), Some(mut new)) = (chunks.next(), chunks.next()) {
-            if let Some(oln) = old.next().and_then(bytes_to_u32) {
-                hunk.old_line_no = oln;
-                hunk.old_line_len = old.next().and_then(bytes_to_u32).unwrap_or(1);
-            } else {
-                return DiffLine::Junk(line);
-            }
-
-            if let Some(nln) = new.next().and_then(|b| bytes_to_u32(&b[1..])) {
-                hunk.new_line_no = nln;
-                hunk.new_line_len = new.next().and_then(bytes_to_u32).unwrap_or(1);
-            } else {
-                return DiffLine::Junk(line);
-            }
+        if let (Some(old), Some(new)) = (chunks.next(), chunks.next()) {
+            hunk.old_line_no = old.0;
+            hunk.old_line_len = old.1;
+            hunk.new_line_no = new.0;
+            hunk.new_line_len = new.1;
 
             return DiffLine::Hunk(hunk);
         }
+
+        return DiffLine::Junk(line);
     }
 
     DiffLine::Junk(line)
