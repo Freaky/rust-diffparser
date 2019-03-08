@@ -1,13 +1,13 @@
 
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FileInfo<'a> {
     pub filename: &'a [u8],
     pub metadata: Option<&'a [u8]>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct HunkInfo<'a> {
     pub old_line_no: u32,
     pub old_line_len: u32,
@@ -16,7 +16,7 @@ pub struct HunkInfo<'a> {
     pub context: Option<&'a [u8]>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum DiffLine<'a> {
     OldFile(FileInfo<'a>),
     NewFile(FileInfo<'a>),
@@ -121,6 +121,7 @@ fn test_parse_range() {
     assert_eq!(parse_range(b"12"), Some((12,1)));
     assert_eq!(parse_range(b"42,"), Some((42,1)));
     assert_eq!(parse_range(b","), None);
+    assert_eq!(parse_range(b""), None);
 }
 
 fn parse_fileinfo(line: &[u8]) -> FileInfo<'_> {
@@ -131,8 +132,8 @@ fn parse_fileinfo(line: &[u8]) -> FileInfo<'_> {
 
     FileInfo {
         filename: &line[4..eof],
-        metadata: if eof != line.len() {
-            Some(&line[eof..line.len()])
+        metadata: if eof != line.len() - 1 {
+            Some(&line[eof + 1..line.len() - 1])
         } else {
             None
         },
@@ -142,25 +143,47 @@ fn parse_fileinfo(line: &[u8]) -> FileInfo<'_> {
 fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
     if line.starts_with(b"Binary files ") && line.ends_with(b"differ\n") {
         // Binary files sigh and blegh differ
-        let x = &line[b"Binary files ".len()..line.len() - b"differ\n".len()];
+        let x = &line[b"Binary files ".len()..line.len() - b" differ\n".len()];
         if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
-            return DiffLine::Binaries(&x[0..pos], &x[pos..]);
+            return DiffLine::Binaries(&x[0..pos], &x[pos+5..]);
         }
     }
 
-    if line.starts_with(b"--- ") {
+    if line.starts_with(b"--- ") && line.len() >= "--- x\n".len() {
         return DiffLine::OldFile(parse_fileinfo(line));
     }
 
     DiffLine::Junk(line)
 }
 
+#[test]
+fn test_parse_old_file() {
+    assert_eq!(parse_old_file(b""), DiffLine::Junk(b""));
+    assert_eq!(parse_old_file(b"Binary files and differ\n"), DiffLine::Junk(b"Binary files and differ\n"));
+    assert_eq!(parse_old_file(b"Binary files foo and bar differ\n"), DiffLine::Binaries(b"foo", b"bar"));
+    assert_eq!(parse_old_file(b"--- x\n"), DiffLine::OldFile(FileInfo { filename: b"x", metadata: None }));
+    assert_eq!(parse_old_file(b"--- foo/bar\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: None }));
+    assert_eq!(parse_old_file(b"--- foo/bar\tfoo bar\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: Some(b"foo bar") }));
+    assert_eq!(parse_old_file(b"--- foo/bar\t\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: Some(b"") }));
+    assert_eq!(parse_old_file(b"--- \n"), DiffLine::Junk(b"--- \n"));
+}
+
 fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
-    if line.starts_with(b"+++ ") {
+    if line.starts_with(b"+++ ") && line.len() >= b"+++ x\n".len() {
         return DiffLine::NewFile(parse_fileinfo(line));
     }
 
     DiffLine::Junk(line)
+}
+
+#[test]
+fn test_parse_new_file() {
+    assert_eq!(parse_new_file(b""), DiffLine::Junk(b""));
+    assert_eq!(parse_new_file(b"+++ x\n"), DiffLine::NewFile(FileInfo { filename: b"x", metadata: None }));
+    assert_eq!(parse_new_file(b"+++ foo/bar\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: None }));
+    assert_eq!(parse_new_file(b"+++ foo/bar\tfoo bar\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: Some(b"foo bar") }));
+    assert_eq!(parse_new_file(b"+++ foo/bar\t\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: Some(b"") }));
+    assert_eq!(parse_new_file(b"+++ \n"), DiffLine::Junk(b"+++ \n"));
 }
 
 fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
