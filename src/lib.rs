@@ -1,4 +1,3 @@
-
 use std::fmt;
 
 #[derive(Debug, PartialEq)]
@@ -78,9 +77,27 @@ impl fmt::Display for DiffLine<'_> {
             DiffLine::Deleted(l) => write!(f, "-{}", String::from_utf8_lossy(l)),
             DiffLine::Modified(l) => write!(f, "!{}", String::from_utf8_lossy(l)),
             DiffLine::NoNewlineAtEof => writeln!(f, "\\ No newline at end of file"),
-            DiffLine::Junk(l) => write!(f, "{}", String::from_utf8_lossy(l))
+            DiffLine::Junk(l) => write!(f, "{}", String::from_utf8_lossy(l)),
         }
     }
+}
+
+fn chomp(slice: &[u8]) -> &[u8] {
+    if slice.ends_with(b"\r\n") {
+        &slice[..slice.len() - 2]
+    } else if slice.ends_with(b"\n") {
+        &slice[..slice.len() - 1]
+    } else {
+        slice
+    }
+}
+
+#[test]
+fn test_chomp() {
+    assert_eq!(chomp(b""), b"");
+    assert_eq!(chomp(b"foo"), b"foo");
+    assert_eq!(chomp(b"foo\r\n"), b"foo");
+    assert_eq!(chomp(b"foo\n"), b"foo");
 }
 
 fn parse_u32(bytes: &[u8]) -> Option<u32> {
@@ -117,9 +134,9 @@ fn parse_range(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[test]
 fn test_parse_range() {
-    assert_eq!(parse_range(b"12,24"), Some((12,24)));
-    assert_eq!(parse_range(b"12"), Some((12,1)));
-    assert_eq!(parse_range(b"42,"), Some((42,1)));
+    assert_eq!(parse_range(b"12,24"), Some((12, 24)));
+    assert_eq!(parse_range(b"12"), Some((12, 1)));
+    assert_eq!(parse_range(b"42,"), Some((42, 1)));
     assert_eq!(parse_range(b","), None);
     assert_eq!(parse_range(b""), None);
 }
@@ -145,11 +162,11 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
         // Binary files sigh and blegh differ
         let x = &line[b"Binary files ".len()..line.len() - b" differ\n".len()];
         if let Some(pos) = x.windows(b" and ".len()).position(|win| win == b" and ") {
-            return DiffLine::Binaries(&x[0..pos], &x[pos+5..]);
+            return DiffLine::Binaries(&x[0..pos], &x[pos + 5..]);
         }
     }
 
-    if line.starts_with(b"--- ") && line.len() >= "--- x\n".len() {
+    if line.len() >= "--- x\n".len() && line.starts_with(b"--- ") {
         return DiffLine::OldFile(parse_fileinfo(line));
     }
 
@@ -159,17 +176,47 @@ fn parse_old_file(line: &[u8]) -> DiffLine<'_> {
 #[test]
 fn test_parse_old_file() {
     assert_eq!(parse_old_file(b""), DiffLine::Junk(b""));
-    assert_eq!(parse_old_file(b"Binary files and differ\n"), DiffLine::Junk(b"Binary files and differ\n"));
-    assert_eq!(parse_old_file(b"Binary files foo and bar differ\n"), DiffLine::Binaries(b"foo", b"bar"));
-    assert_eq!(parse_old_file(b"--- x\n"), DiffLine::OldFile(FileInfo { filename: b"x", metadata: None }));
-    assert_eq!(parse_old_file(b"--- foo/bar\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: None }));
-    assert_eq!(parse_old_file(b"--- foo/bar\tfoo bar\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: Some(b"foo bar") }));
-    assert_eq!(parse_old_file(b"--- foo/bar\t\n"), DiffLine::OldFile(FileInfo { filename: b"foo/bar", metadata: Some(b"") }));
+    assert_eq!(
+        parse_old_file(b"Binary files and differ\n"),
+        DiffLine::Junk(b"Binary files and differ\n")
+    );
+    assert_eq!(
+        parse_old_file(b"Binary files foo and bar differ\n"),
+        DiffLine::Binaries(b"foo", b"bar")
+    );
+    assert_eq!(
+        parse_old_file(b"--- x\n"),
+        DiffLine::OldFile(FileInfo {
+            filename: b"x",
+            metadata: None
+        })
+    );
+    assert_eq!(
+        parse_old_file(b"--- foo/bar\n"),
+        DiffLine::OldFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: None
+        })
+    );
+    assert_eq!(
+        parse_old_file(b"--- foo/bar\tfoo bar\n"),
+        DiffLine::OldFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: Some(b"foo bar")
+        })
+    );
+    assert_eq!(
+        parse_old_file(b"--- foo/bar\t\n"),
+        DiffLine::OldFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: Some(b"")
+        })
+    );
     assert_eq!(parse_old_file(b"--- \n"), DiffLine::Junk(b"--- \n"));
 }
 
 fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
-    if line.starts_with(b"+++ ") && line.len() >= b"+++ x\n".len() {
+    if line.len() >= b"+++ x\n".len() && line.starts_with(b"+++ ") {
         return DiffLine::NewFile(parse_fileinfo(line));
     }
 
@@ -179,10 +226,34 @@ fn parse_new_file(line: &[u8]) -> DiffLine<'_> {
 #[test]
 fn test_parse_new_file() {
     assert_eq!(parse_new_file(b""), DiffLine::Junk(b""));
-    assert_eq!(parse_new_file(b"+++ x\n"), DiffLine::NewFile(FileInfo { filename: b"x", metadata: None }));
-    assert_eq!(parse_new_file(b"+++ foo/bar\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: None }));
-    assert_eq!(parse_new_file(b"+++ foo/bar\tfoo bar\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: Some(b"foo bar") }));
-    assert_eq!(parse_new_file(b"+++ foo/bar\t\n"), DiffLine::NewFile(FileInfo { filename: b"foo/bar", metadata: Some(b"") }));
+    assert_eq!(
+        parse_new_file(b"+++ x\n"),
+        DiffLine::NewFile(FileInfo {
+            filename: b"x",
+            metadata: None
+        })
+    );
+    assert_eq!(
+        parse_new_file(b"+++ foo/bar\n"),
+        DiffLine::NewFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: None
+        })
+    );
+    assert_eq!(
+        parse_new_file(b"+++ foo/bar\tfoo bar\n"),
+        DiffLine::NewFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: Some(b"foo bar")
+        })
+    );
+    assert_eq!(
+        parse_new_file(b"+++ foo/bar\t\n"),
+        DiffLine::NewFile(FileInfo {
+            filename: b"foo/bar",
+            metadata: Some(b"")
+        })
+    );
     assert_eq!(parse_new_file(b"+++ \n"), DiffLine::Junk(b"+++ \n"));
 }
 
@@ -204,6 +275,8 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
             hunk.new_line_no = new.0;
             hunk.new_line_len = new.1;
 
+            hunk.context = line.splitn(2, |&b| b == b'\t').nth(1).map(chomp);
+
             return DiffLine::Hunk(hunk);
         }
 
@@ -211,6 +284,41 @@ fn parse_hunk(line: &[u8]) -> DiffLine<'_> {
     }
 
     DiffLine::Junk(line)
+}
+
+#[test]
+fn test_parse_hunk() {
+    assert_eq!(parse_hunk(b""), DiffLine::Junk(b""));
+    assert_eq!(
+        parse_hunk(b"@@ -1 +1 @@\n"),
+        DiffLine::Hunk(HunkInfo {
+            old_line_no: 1,
+            old_line_len: 1,
+            new_line_no: 1,
+            new_line_len: 1,
+            context: None
+        })
+    );
+    assert_eq!(
+        parse_hunk(b"@@ -12,34 +56,78 @@\n"),
+        DiffLine::Hunk(HunkInfo {
+            old_line_no: 12,
+            old_line_len: 34,
+            new_line_no: 56,
+            new_line_len: 78,
+            context: None
+        })
+    );
+    assert_eq!(
+        parse_hunk(b"@@ -12,34 +56,78 @@\tfoo bar\n"),
+        DiffLine::Hunk(HunkInfo {
+            old_line_no: 12,
+            old_line_len: 34,
+            new_line_no: 56,
+            new_line_len: 78,
+            context: Some(b"foo bar")
+        })
+    );
 }
 
 fn parse_delta(line: &[u8]) -> DiffLine<'_> {
@@ -222,6 +330,19 @@ fn parse_delta(line: &[u8]) -> DiffLine<'_> {
         b'\\' => DiffLine::NoNewlineAtEof,
         _ => DiffLine::Junk(line),
     }
+}
+
+#[test]
+fn test_parse_delta() {
+    assert_eq!(parse_delta(b"+foo\n"), DiffLine::Inserted(b"foo\n"));
+    assert_eq!(parse_delta(b"-foo\n"), DiffLine::Deleted(b"foo\n"));
+    assert_eq!(parse_delta(b"!foo\n"), DiffLine::Modified(b"foo\n"));
+    assert_eq!(parse_delta(b" foo\n"), DiffLine::Context(b"foo\n"));
+    assert_eq!(
+        parse_delta(b"\\ No newline at end of file\n"),
+        DiffLine::NoNewlineAtEof
+    );
+    assert_eq!(parse_delta(b"foo\n"), DiffLine::Junk(b"foo\n"));
 }
 
 #[derive(Debug)]
@@ -309,8 +430,8 @@ impl<R: BufRead> DiffParser<R> {
                     DiffLine::Junk(line) => {
                         self.state = State::Junk;
                         return Some(Ok(DiffLine::Junk(line)));
-                    },
-                    _ => unreachable!()
+                    }
+                    _ => unreachable!(),
                 };
 
                 if (*old < 0 || *new < 0) || (*old == 0 && *new == 0) {
